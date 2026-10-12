@@ -1,6 +1,6 @@
 // Satzbuch service worker: caches the whole app so it starts offline.
 // After changing any file, raise VERSION so phones fetch the new files.
-const VERSION = 'satzbuch-v1';
+const VERSION = 'satzbuch-v2';
 const FILES = [
   './',
   './index.html',

@@ -60,6 +60,10 @@ header h1{font:800 26px/1 var(--display);letter-spacing:.01em;margin:0;flex:1;mi
 .gear{border:0;background:var(--sunk);border-radius:50%;width:38px;height:38px;font-size:19px;line-height:1;flex:none;color:var(--muted)}
 .datacard p{margin:0;color:var(--muted);font-size:15px}
 .datacard h2{margin:0;font:700 22px/1.1 var(--display);text-transform:uppercase}
+.backup-due{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-wash);border-radius:var(--r);padding:10px 12px}
+.backup-due span{flex:1 1 100%;font-size:15px}
+.backup-due .btn{padding:9px 12px;font-size:15px}
+.backup-due .linkbtn{padding:4px 2px}
 .msg{font-size:14px;font-weight:600;color:var(--done)}
 .msg.err{color:var(--warn)}
 
@@ -316,7 +320,7 @@ const tabs = active => `<div class="tabs" role="tablist"><button role="tab" data
 function renderList(){
   $title.textContent = 'Satzbuch'; $back.hidden = true;
   const s = state.session;
-  let h = tabs('list');
+  let h = tabs('list') + backupBanner();
   if (s.active) {
     const done = s.exercises.reduce((a,x)=>a+x.sets.filter(t=>t.done).length,0);
     const all = s.exercises.reduce((a,x)=>a+x.sets.length,0);
@@ -523,7 +527,7 @@ function chartLeave(ev){
 function renderHistory(){
   $title.textContent = 'Satzbuch'; $back.hidden = true;
   $bar.hidden = true; $bar.innerHTML = '';
-  let h = tabs('history');
+  let h = tabs('history') + backupBanner();
   const idx = exerciseIndex();
   if (!hist.list.length) {
     h += `<div class="empty"><strong>Noch keine Trainings</strong><span>Sobald du ein Training beendest, landet es hier. Für jede Übung siehst du dann, wie sich dein Gewicht entwickelt.</span></div>`;
@@ -583,6 +587,19 @@ function workoutsHTML(){
 
 /* ---------- data & backup ---------- */
 let dataMsg = null, pendingImport = null;
+const BACKUP_DAYS = 7;
+const lsGet = k => { try { return localStorage.getItem(LS + k); } catch(e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(LS + k, v); } catch(e) {} };
+function backupBanner(){
+  const hasData = state.plans.list.length || hist.list.length;
+  if (!hasData) return '';
+  const last = +lsGet('.lastBackup') || 0, snooze = +lsGet('.backupSnooze') || 0, now = Date.now();
+  const days = last ? Math.floor((now - last) / 86400000) : null;
+  if (last && days < BACKUP_DAYS) return '';
+  if (snooze > now) return '';
+  const txt = last ? `Letztes Backup vor ${days} Tagen.` : 'Du hast noch kein Backup gemacht.';
+  return `<div class="backup-due" role="status"><span>${txt}</span><button class="btn primary" data-act="export">Jetzt sichern</button><button class="linkbtn" data-act="snooze">Später</button></div>`;
+}
 const cnt = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 function backupJSON(){
   return JSON.stringify({ app:'satzbuch', format:1, exportedAt:new Date().toISOString(),
@@ -594,7 +611,7 @@ function renderData(){
   const nPlans = state.plans.list.length, nW = hist.list.length;
   let size = 0; try { size = new Blob([backupJSON()]).size; } catch(e){}
   let h = `<section class="card datacard"><h2>Backup exportieren</h2>
-    <p>Speichert alle Pläne und ${nW} ${nW===1?'Training':'Trainings'} als Datei (${Math.max(1, Math.round(size/1024))} KB). Wähle im Teilen-Menü „In Dateien sichern“, z.&nbsp;B. in iCloud Drive.</p>
+    <p>${(+lsGet('.lastBackup')) ? `Letztes Backup: ${dLong(+lsGet('.lastBackup'))}. ` : 'Noch kein Backup. '}Speichert alle Pläne und ${nW} ${nW===1?'Training':'Trainings'} als Datei (${Math.max(1, Math.round(size/1024))} KB). Wähle im Teilen-Menü „In Dateien sichern“, z.&nbsp;B. in iCloud Drive.</p>
     <button class="btn primary small" data-act="export">Backup exportieren</button></section>`;
   h += `<section class="card datacard"><h2>Backup importieren</h2>
     <p>Ersetzt alle Daten auf diesem Gerät durch den Inhalt der Backup-Datei.</p>
@@ -615,13 +632,14 @@ async function doExport(){
     const file = new File([blob], name, { type:'application/json' });
     if (navigator.canShare && navigator.canShare({ files:[file] })) {
       await navigator.share({ files:[file], title:'Satzbuch-Backup' });
-      dataMsg = { text:'Backup erstellt.' }; renderData(); return;
+      lsSet('.lastBackup', String(Date.now())); dataMsg = { text:'Backup erstellt.' }; afterExport(); return;
     }
   } catch(e) { if (e && e.name === 'AbortError') return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  dataMsg = { text:'Backup heruntergeladen.' }; renderData();
+  lsSet('.lastBackup', String(Date.now())); dataMsg = { text:'Backup heruntergeladen.' }; afterExport();
 }
+function afterExport(){ if (view.name === 'data') renderData(); else render(); }
 function readImport(file){
   const r = new FileReader();
   r.onload = () => {
@@ -654,6 +672,7 @@ document.addEventListener('click', ev => {
   switch (act) {
     case 'tab': go(b.dataset.v); break;
     case 'export': doExport(); break;
+    case 'snooze': { const t = new Date(); t.setHours(24,0,0,0); lsSet('.backupSnooze', String(t.getTime())); render(); break; }
     case 'importpick': document.getElementById('importfile').click(); break;
     case 'importno': pendingImport = null; renderData(); break;
     case 'importyes': {
