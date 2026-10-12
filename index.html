@@ -97,6 +97,12 @@ main{padding:16px 16px 120px;max-width:640px;margin:0 auto;display:flex;flex-dir
 .ex-head{display:flex;gap:8px;align-items:center}
 .ex-head .text{font:700 20px/1.1 var(--display);text-transform:uppercase;padding:8px 10px}
 .ex-title{font:700 22px/1.1 var(--display);text-transform:uppercase;flex:1;min-width:0}
+.sug{display:flex;gap:6px;flex-wrap:wrap;margin-top:-4px}
+.sug button{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:6px 11px;font-size:14px;font-weight:600;color:var(--fg)}
+.exnote{width:100%;border:1px dashed transparent;background:transparent;border-radius:6px;padding:4px 6px;margin:-4px 0 -2px;
+  font:400 16px/1.35 var(--body);color:var(--muted);resize:none;overflow:hidden;min-height:30px}
+.exnote::placeholder{color:var(--muted);opacity:.6}
+.exnote:focus{border-color:var(--line);background:var(--bg);color:var(--fg);outline:none}
 .best{font-size:12px;line-height:1.2;color:var(--muted);margin-top:-6px;padding-left:2px;font-variant-numeric:tabular-nums}
 .ex-count{font:600 13px var(--body);color:var(--muted);font-variant-numeric:tabular-nums}
 
@@ -295,10 +301,10 @@ const setsLabel = p => { const e = p.exercises.length, s = p.exercises.reduce((a
 function go(name, planId){ view = { name, planId: planId ?? null, confirm:null }; localSave(); render(); window.scrollTo(0,0); }
 function safeRender(){
   const a = document.activeElement;
-  if (a && a.tagName === 'INPUT') { deferRender = true; return; }
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) { deferRender = true; return; }
   render();
 }
-document.addEventListener('focusout', () => setTimeout(() => { if (deferRender && document.activeElement?.tagName !== 'INPUT') { deferRender = false; render(); } }, 0));
+document.addEventListener('focusout', () => setTimeout(() => { if (deferRender && !['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)) { deferRender = false; render(); } }, 0));
 
 /* ---------- views ---------- */
 const $main = document.getElementById('main'), $bar = document.getElementById('bar');
@@ -312,6 +318,7 @@ function render(){
   if (!['list','plan','workout','history','data'].includes(view.name)) view.name = 'list';
   document.getElementById('gear').hidden = !(view.name === 'list' || view.name === 'history');
   ({ list: renderList, plan: renderPlan, workout: renderWorkout, history: renderHistory, data: renderData })[view.name]();
+  growNotes();
   setSync();
 }
 
@@ -355,6 +362,28 @@ function lastTrained(planId){
   return `Zuletzt: ${when}, ${time} Uhr` + (diff > 1 ? ` · vor ${diff} Tagen` : '');
 }
 
+function noteField(planId, e){
+  return `<textarea class="exnote" rows="1" id="note-${e.id}" data-f="exnote" data-pid="${planId}" data-xid="${e.id}" placeholder="Notiz, z. B. Sitzhöhe 4, enger Griff" aria-label="Notiz zur Übung">${esc(e.note || '')}</textarea>`;
+}
+function growNotes(){ document.querySelectorAll('.exnote').forEach(t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }); }
+function knownNames(){
+  // unique exercise names, most recently used first (history, then plans)
+  const seen = new Map();
+  hist.list.slice().sort((a,b) => b.startedAt - a.startedAt).forEach(w => (w.exercises||[]).forEach(e => { const k = exKey(e.name); if (k && !seen.has(k)) seen.set(k, e.name.trim()); }));
+  state.plans.list.forEach(p => p.exercises.forEach(e => { const k = exKey(e.name); if (k && !seen.has(k)) seen.set(k, e.name.trim()); }));
+  return [...seen.values()];
+}
+function showSuggestions(input){
+  const box = document.getElementById('sug-' + input.id.slice(3)); if (!box) return;
+  const q = exKey(input.value), self = exKey(input.value);
+  const used = new Set(plan(view.planId).exercises.filter(x => 'ex-' + x.id !== input.id).map(x => exKey(x.name)));
+  let list = knownNames().filter(n => exKey(n) !== self && !used.has(exKey(n)));
+  if (q) list = list.filter(n => exKey(n).includes(q)).sort((a,b) => exKey(b).startsWith(q) - exKey(a).startsWith(q));
+  list = list.slice(0, q ? 5 : 6);
+  box.hidden = !list.length;
+  box.innerHTML = list.map(n => `<button type="button" data-act="pickname" data-for="${input.id}" data-name="${esc(n)}">${esc(n)}</button>`).join('');
+}
+
 function bestLine(name, planId){
   const k = exKey(name); if (!k) return '';
   const cut = Date.now() - 30*86400000;
@@ -382,8 +411,8 @@ function renderPlan(){
   let h = `<div class="field"><label class="label" for="plan-name">Name des Plans</label><input class="text" id="plan-name" value="${esc(p.name)}" placeholder="z. B. Push, Pull, Beine" data-f="planname"></div>`;
   if (!p.exercises.length) h += `<div class="empty"><strong>Keine Übungen</strong><span>Füge die erste Übung hinzu.</span></div>`;
   p.exercises.forEach((e, ei) => {
-    h += `<section class="ex"><div class="ex-head"><input class="text" id="ex-${e.id}" value="${esc(e.name)}" placeholder="Übung, z. B. Bankdrücken" data-f="exname" data-e="${ei}" aria-label="Name der Übung">
-      <button class="x" data-act="delex" data-e="${ei}" aria-label="Übung entfernen" style="${view.confirm==='ex'+ei?'color:var(--warn);font-size:13px;font-weight:700':''}">${view.confirm==='ex'+ei?'Löschen?':'✕'}</button></div>${bestLine(e.name, p.id)}
+    h += `<section class="ex"><div class="ex-head"><input class="text" id="ex-${e.id}" value="${esc(e.name)}" placeholder="Übung, z. B. Bankdrücken" data-f="exname" data-e="${ei}" aria-label="Name der Übung" autocomplete="off" autocapitalize="words">
+      <button class="x" data-act="delex" data-e="${ei}" aria-label="Übung entfernen" style="${view.confirm==='ex'+ei?'color:var(--warn);font-size:13px;font-weight:700':''}">${view.confirm==='ex'+ei?'Löschen?':'✕'}</button></div><div class="sug" id="sug-${e.id}" hidden></div>${bestLine(e.name, p.id)}${noteField(p.id, e)}
       <div class="cols"><span>Satz</span><span>Wdh.</span><span>kg</span><span></span></div><div class="sets">`;
     e.sets.forEach((t, si) => {
       const d = `data-e="${ei}" data-s="${si}"`;
@@ -412,7 +441,7 @@ function renderWorkout(){
     <div class="meter"><i id="meter" style="width:${all?done/all*100:0}%"></i></div></div>`;
   s.exercises.forEach((e, ei) => {
     const ed = e.sets.filter(t=>t.done).length;
-    h += `<section class="ex"><div class="ex-head"><span class="ex-title">${esc(e.name || 'Übung')}</span><span class="ex-count" id="ec-${ei}">${ed}/${e.sets.length}</span></div>${bestLine(e.name, s.planId)}
+    h += `<section class="ex"><div class="ex-head"><span class="ex-title">${esc(e.name || 'Übung')}</span><span class="ex-count" id="ec-${ei}">${ed}/${e.sets.length}</span></div>${bestLine(e.name, s.planId)}${(() => { const pe = plan(s.planId)?.exercises.find(x => x.id === e.id); return pe ? noteField(s.planId, pe) : ''; })()}
       <div class="cols w"><span>Satz</span><span>Wdh.</span><span>kg</span></div><div class="sets">`;
     e.sets.forEach((t, si) => {
       const d = `data-e="${ei}" data-s="${si}"`;
@@ -671,6 +700,10 @@ document.addEventListener('click', ev => {
   const p = plan(view.planId);
   switch (act) {
     case 'tab': go(b.dataset.v); break;
+    case 'pickname': {
+      const inp = document.getElementById(b.dataset.for); if (!inp) break;
+      inp.value = b.dataset.name; plan(view.planId).exercises[+inp.dataset.e].name = b.dataset.name; save('plans');
+      document.getElementById('sug-' + inp.id.slice(3)).hidden = true; inp.blur(); render(); break; }
     case 'export': doExport(); break;
     case 'snooze': { const t = new Date(); t.setHours(24,0,0,0); lsSet('.backupSnooze', String(t.getTime())); render(); break; }
     case 'importpick': document.getElementById('importfile').click(); break;
@@ -747,10 +780,25 @@ $back.addEventListener('click', () => go('list'));
 document.addEventListener('input', ev => {
   const i = ev.target;
   if (i.dataset.f === 'planname') { plan(view.planId).name = i.value; $title.textContent = i.value || 'Neuer Plan'; save('plans'); return; }
-  if (i.dataset.f === 'exname') { plan(view.planId).exercises[+i.dataset.e].name = i.value; save('plans'); return; }
+  if (i.dataset.f === 'exname') { plan(view.planId).exercises[+i.dataset.e].name = i.value; save('plans'); showSuggestions(i); return; }
+  if (i.dataset.f === 'exnote') {
+    const pe = plan(i.dataset.pid)?.exercises.find(x => x.id === i.dataset.xid);
+    if (pe) { pe.note = i.value; save('plans'); }
+    i.style.height = 'auto'; i.style.height = i.scrollHeight + 'px'; return; }
   if (i.dataset.k) { const t = target()[+i.dataset.e].sets[+i.dataset.s]; t[i.dataset.k === 'w' ? 'weight' : 'reps'] = Math.max(0, num(i.value)); save(key()); }
 });
-document.addEventListener('focusin', ev => { if (ev.target.tagName === 'INPUT' && ev.target.dataset.k) ev.target.select(); });
+document.addEventListener('focusin', ev => {
+  if (ev.target.tagName === 'INPUT' && ev.target.dataset.k) ev.target.select();
+  if (ev.target.dataset && ev.target.dataset.f === 'exname') showSuggestions(ev.target);
+});
+document.addEventListener('focusout', ev => {
+  if (ev.target.dataset && ev.target.dataset.f === 'exname') {
+    const box = document.getElementById('sug-' + ev.target.id.slice(3));
+    setTimeout(() => { if (box && document.activeElement !== ev.target) box.hidden = true; }, 250);
+  }
+});
+// keep focus on the name field while tapping a suggestion
+document.addEventListener('pointerdown', ev => { if (ev.target.closest('[data-act=pickname]')) ev.preventDefault(); });
 document.addEventListener('change', ev => { const i = ev.target; if (i.dataset.k) { const t = target()[+i.dataset.e].sets[+i.dataset.s]; i.value = fmt(t[i.dataset.k === 'w' ? 'weight' : 'reps']); } });
 
 render();
